@@ -1,0 +1,14 @@
+{
+    "name": "docx-interactive-card",
+    "description": "DOCX to INTERACTIVE",
+    "type": "project",
+    "require": {
+        "php": ">=8.1",
+        "phpoffice/phpword": "^1.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "DocxCard\\": "src/"
+        }
+    }
+}

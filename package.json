@@ -1,0 +1,10 @@
+{
+  "name": "docx-interactive-card",
+  "private": true,
+  "description": "npm-обертка",
+  "scripts": {
+    "deps": "composer install",
+    "check": "php -r \"require 'vendor/autoload.php'; print_r(DocxCard\\\\DocxConverter::checkDependencies());\"",
+    "dev": "php -S localhost:8080 -t public router.php"
+  }
+}
