@@ -79,7 +79,7 @@ php -S localhost:8080 -t public router.php
     └── output/
 ```
 
-## Формат шаблона переменных для DOCX
+## Формат плейсхолдеров в DOCX
 
 ```
 {fieldName_fieldType:Пояснение для человеков}

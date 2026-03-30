@@ -56,17 +56,19 @@ class DocxConverter
             $debug['steps'][] = 'Конвертация в PDF через LibreOffice';
 
             $extractor = new FieldExtractor();
-            $markers = $extractor->extractPositions($pdfPath, $fields);
-            $debug['markers_found'] = count($markers);
-            $debug['steps'][] = 'Извлечено ' . count($markers) . ' позиций маркеров';
+            $markersByPage = $extractor->extractPositions($pdfPath, $fields);
+            $totalMarkers = array_sum(array_map('count', $markersByPage));
+            $debug['markers_found'] = $totalMarkers;
+            $debug['steps'][] = 'Извлечено ' . $totalMarkers . ' позиций маркеров на ' . count($markersByPage) . ' страницах';
 
-            $imageData = $this->generateJpeg($pdfPath, $tmpDir);
-            $debug['steps'][] = 'Сгенерировано превью JPEG (' . $this->jpegDpi . ' DPI)';
-            $debug['image_size_bytes'] = (int)(strlen($imageData) * 3 / 4);
+            $images = $this->generateJpegs($pdfPath, $tmpDir);
+            $debug['steps'][] = 'Сгенерировано ' . count($images) . ' превью JPEG (' . $this->jpegDpi . ' DPI)';
 
             $mapped = [];
-            foreach ($markers as $m) {
-                $mapped[$m['index']] = true;
+            foreach ($markersByPage as $pageMarkers) {
+                foreach ($pageMarkers as $m) {
+                    $mapped[$m['index']] = true;
+                }
             }
             $unmapped = [];
             foreach ($fields as $i => $f) {
@@ -77,9 +79,16 @@ class DocxConverter
             $debug['mapped_fields'] = count($mapped);
             $debug['unmapped_fields'] = $unmapped;
 
+            $pages = [];
+            foreach ($images as $pageIdx => $imageData) {
+                $pages[] = [
+                    'image' => $imageData,
+                    'markers' => $markersByPage[$pageIdx] ?? [],
+                ];
+            }
+
             return [
-                'image' => $imageData,
-                'markers' => $markers,
+                'pages' => $pages,
                 'debug' => $debug,
             ];
         } finally {
@@ -219,10 +228,9 @@ class DocxConverter
 
         foreach ($phpwordVars as $rawVar) {
             $plainText = preg_replace('/\s+/', ' ', trim(strip_tags($rawVar)));
-            if (preg_match('/^([a-zA-Z][a-zA-Z0-9_]*)_([a-zA-Z]+):(.+)$/', $plainText, $m)) {
-                if (isset($valueMap[$m[1]])) {
-                    $processor->setValue($rawVar, $valueMap[$m[1]]);
-                }
+            $fieldName = $this->resolveFieldName($plainText);
+            if ($fieldName !== null && isset($valueMap[$fieldName])) {
+                $processor->setValue($rawVar, $valueMap[$fieldName]);
             }
         }
 
@@ -254,6 +262,28 @@ class DocxConverter
         $zSrc->close();
         $zDst->close();
         @unlink($phpwordTmp);
+    }
+
+    private function resolveFieldName(string $inner): ?string
+    {
+
+        if (preg_match('/^([a-zA-Z][a-zA-Z0-9_]*)_([a-zA-Z]+):(.+)$/', $inner, $m)) {
+            return $m[1];
+        }
+
+        if (preg_match('/^([a-zA-Z][a-zA-Z0-9_]*):(.+)$/', $inner, $m)) {
+            return $m[1];
+        }
+
+        if (preg_match('/^([a-zA-Z][a-zA-Z0-9_]*)_([a-zA-Z]+)$/', $inner, $m)) {
+            return $m[1];
+        }
+
+        if (preg_match('/^([a-zA-Z][a-zA-Z0-9_]*)$/', $inner, $m)) {
+            return $m[1];
+        }
+
+        return null;
     }
 
     private function normalizeFieldType(string $type): string
@@ -414,11 +444,11 @@ class DocxConverter
         return $pdfPath;
     }
 
-    private function generateJpeg(string $pdfPath, string $tmpDir): string
+    private function generateJpegs(string $pdfPath, string $tmpDir): array
     {
         $jpgBase = $tmpDir . '/preview';
         $cmd = sprintf(
-            'pdftoppm -jpeg -r %d -f 1 -singlefile %s %s 2>&1',
+            'pdftoppm -jpeg -r %d %s %s 2>&1',
             $this->jpegDpi,
             escapeshellarg($pdfPath),
             escapeshellarg($jpgBase)
@@ -426,12 +456,24 @@ class DocxConverter
 
         exec($cmd, $output, $returnCode);
 
-        $jpgPath = $jpgBase . '.jpg';
-        if (!file_exists($jpgPath)) {
+        $jpgFiles = glob($jpgBase . '-*.jpg');
+
+        if (empty($jpgFiles) && file_exists($jpgBase . '.jpg')) {
+            $jpgFiles = [$jpgBase . '.jpg'];
+        }
+
+        if (empty($jpgFiles)) {
             throw new \RuntimeException('Ошибка генерации JPEG: ' . implode("\n", $output));
         }
 
-        return 'data:image/jpeg;base64,' . base64_encode(file_get_contents($jpgPath));
+        sort($jpgFiles);
+
+        $images = [];
+        foreach ($jpgFiles as $jpgPath) {
+            $images[] = 'data:image/jpeg;base64,' . base64_encode(file_get_contents($jpgPath));
+        }
+
+        return $images;
     }
 
     public static function checkDependencies(): array

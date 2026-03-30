@@ -91,8 +91,7 @@ try {
         'template_id' => $templateId,
         'original_name' => $uploadedFile['name'],
         'fields' => $fields,
-        'image' => $result['image'],
-        'markers' => $result['markers'],
+        'pages' => $result['pages'],
         'debug' => $result['debug'],
     ], JSON_UNESCAPED_UNICODE);
 

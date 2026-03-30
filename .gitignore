@@ -1,2 +1,6 @@
 storage/
 vendor/
+composer.json
+composer.lock
+package-lock.json
+node_modules/
