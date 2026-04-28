@@ -5,10 +5,10 @@ declare(strict_types=1);
 require_once __DIR__ . '/../vendor/autoload.php';
 
 use DocxCard\DocxConverter;
+use DocxCard\ApiException;
+use DocxCard\Security;
 
 header('Content-Type: application/json; charset=utf-8');
-
-// CORS нужен для локального фронта - на проде убрать или ограничить origin.
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
@@ -25,43 +25,24 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 try {
+    Security::cleanupStorage();
+    Security::rateLimit('convert', 20);
+    Security::requireContentLength(Security::MAX_UPLOAD_BYTES + 1048576);
+
     $deps = DocxConverter::checkDependencies();
     if (!$deps['ok']) {
-        throw new RuntimeException('Отсутствуют системные зависимости: ' . implode(', ', $deps['missing']));
+        throw new ApiException('Сервис временно не готов к обработке документов', 503);
     }
 
-    if (empty($_FILES['template']) || $_FILES['template']['error'] !== UPLOAD_ERR_OK) {
-        throw new RuntimeException('Файл шаблона не загружен или ошибка загрузки');
-    }
-
-    $uploadedFile = $_FILES['template'];
-    $ext = strtolower(pathinfo($uploadedFile['name'], PATHINFO_EXTENSION));
-    if ($ext !== 'docx') {
-        throw new RuntimeException('Поддерживаются только .docx файлы');
-    }
-
-    $finfo = new finfo(FILEINFO_MIME_TYPE);
-    $mime = $finfo->file($uploadedFile['tmp_name']);
-    $allowedMimes = [
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'application/zip',
-        'application/octet-stream',
-    ];
-    if (!in_array($mime, $allowedMimes, true)) {
-        throw new RuntimeException('Неверный тип файла: ' . $mime);
-    }
-
-    $storageDir = __DIR__ . '/../storage/templates';
-    if (!is_dir($storageDir)) {
-        mkdir($storageDir, 0755, true);
-    }
+    $uploadedFile = Security::uploadedDocx('template');
+    $storageDir = Security::storageDir('templates');
 
     $templateId = bin2hex(random_bytes(8));
     $storedName = $templateId . '.docx';
     $storedPath = $storageDir . '/' . $storedName;
 
     if (!move_uploaded_file($uploadedFile['tmp_name'], $storedPath)) {
-        throw new RuntimeException('Не удалось сохранить загруженный файл');
+        throw new ApiException('Не удалось сохранить загруженный файл', 500);
     }
 
     $converter = new DocxConverter();
@@ -69,7 +50,7 @@ try {
 
     if (empty($fields)) {
         @unlink($storedPath);
-        throw new RuntimeException(
+        throw new ApiException(
             'В шаблоне не найдено плейсхолдеров вида {variable}. '
             . 'Используйте паттерны типа {fieldName_text:Label} или {fieldName:Label}'
         );
@@ -95,10 +76,17 @@ try {
         'debug' => $result['debug'],
     ], JSON_UNESCAPED_UNICODE);
 
-} catch (Throwable $e) {
-    http_response_code(400);
+} catch (ApiException $e) {
+    http_response_code($e->statusCode());
     echo json_encode([
         'success' => false,
         'error' => $e->getMessage(),
+    ], JSON_UNESCAPED_UNICODE);
+} catch (Throwable $e) {
+    Security::logError($e);
+    http_response_code(500);
+    echo json_encode([
+        'success' => false,
+        'error' => 'Не удалось обработать документ',
     ], JSON_UNESCAPED_UNICODE);
 }

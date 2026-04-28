@@ -304,6 +304,8 @@ class DocxConverter
 
     private function hideVariablesInDocx(string $templatePath, string $tmpDir): string
     {
+        Security::validateDocxZip($templatePath);
+
         $extractDir = $tmpDir . '/docx_contents';
         @mkdir($extractDir, 0755, true);
 
